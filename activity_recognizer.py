@@ -3,6 +3,8 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtCore
 from pyqtgraph.flowchart import Flowchart, Node
 import pyqtgraph.flowchart.library as fclib
+
+from DIPPID import SensorUDP
 from DIPPID_pyqtnode import BufferNode, DIPPIDNode
 import numpy as np
 from pylab import *
@@ -41,17 +43,17 @@ class FftNode(Node):
         avg = []
         for i in range(len(kargs['accelX'])):
             avg.append((kargs['accelX'][i] + kargs['accelY'][i] + kargs['accelZ'][i])/3)
-        print(avg)
-        frequency = np.abs(np.fft.fft(avg))
-        print(frequency)
-        self.frequency_x = np.abs(np.fft.fft(kargs['accelX']))
-        self.frequency_y = np.abs(np.fft.fft(kargs['accelY']))
-        self.frequency_z = np.abs(np.fft.fft(kargs['accelZ']))
+        # print(avg)
+        frequency = np.abs(np.fft.fft(avg)/len(avg))[1:len(avg)//2]
+        # print(frequency)
+        self.frequency_x = np.abs(np.fft.fft(kargs['accelX'])/2)
+        self.frequency_y = np.abs(np.fft.fft(kargs['accelY'])/2)
+        self.frequency_z = np.abs(np.fft.fft(kargs['accelZ'])/2)
         #self.frequency_x = [np.abs(fft(l) / len(l))[1:len(l) // 2] for l in kargs['accelX']]
         #self.frequency_y = [np.abs(fft(l) / len(l))[1:len(l) // 2] for l in kargs['accelY']]
         #self.frequency_z = [np.abs(fft(l) / len(l))[1:len(l) // 2] for l in kargs['accelZ']]
         #print('dx: ', self.data_x, ' dy: ', self.data_y, ' dz: ', self.data_z)
-        print('x: ', self.frequency_x, ' y: ', self.frequency_y, ' z: ', self.frequency_z)
+        # print('x: ', self.frequency_x, ' y: ', self.frequency_y, ' z: ', self.frequency_z)
         return {'frequency': frequency}
 
 
@@ -61,11 +63,14 @@ fclib.registerNodeType(FftNode, [('Fft',)])
 class SvmNode(Node):
 
     nodeName = 'Svm'
+
+    TRAINING = 'training'
+    PREDICTION = 'prediction'
+    INACTIVE = 'inactive'
     # different modes (training, prediction, inactive)
     # ports dependent on mode
     # prediciton: in: sample, out: prediction
     # training: in: list of frequncy, train data, out:? (current recognition?) category as textfield
-
 
     # when train active, press button 1 to start motion, as long as same name it trains, adds activity when name and
     # button 1 is pressed first.
@@ -76,11 +81,17 @@ class SvmNode(Node):
             'prediction': dict(io='out'),
         }
         self.predict = ''
-        self.activities = ['jump', 'work', 'walk', 'stand', 'hop']
+        self.activities = []  # ['jump', 'work', 'walk', 'stand', 'hop']
+        self.act_data = {}
+        self.mode = self.INACTIVE
+        self.recording = False
+        self.c = svm.SVC()
+
         self._init_ui()
 
         # self.timer = QtCore.QTimer()
-        # self.timer.timeout().connect()
+        # self.timer.timeout().connect(self.handle_input)
+        # self.timer.start(100)
         Node.__init__(self, name, terminals=terminals)
 
     def _init_ui(self):
@@ -102,6 +113,8 @@ class SvmNode(Node):
 
         # instructions and name tag
         self.instructions = QtGui.QLabel()
+        self.instructions.setText('This node is inactive. Choose one of the other '
+                                  'two modes to train or predict an activity.')
         self.mode_layout.addWidget(self.instructions, 1, 0, 3, 3)
         self.act_name = QtGui.QLineEdit()
         self.act_name.setVisible(False)
@@ -145,7 +158,7 @@ class SvmNode(Node):
         self.init_activity()
 
     def retrain_activity(self, activity):
-        # show training is chosen
+        self.mode = self.TRAINING
         self.instructions.setText('Press Button 1 and execute '
                                   'the activity. By releasing Button 1 you stop the current record.\n You can record '
                                   'multiple example of the same activity like that.')
@@ -153,6 +166,7 @@ class SvmNode(Node):
         self.act_name.setVisible(True)
 
     def show_training_mode(self):
+        self.mode = self.TRAINING
         self.instructions.setText('Enter name of the activity you want to train. Then press Button 1 and execute '
                                   'the activity. By releasing\nButton 1 you stop the current record. You can record '
                                   'multiple example of the same activity like that.')
@@ -160,17 +174,50 @@ class SvmNode(Node):
         self.act_name.setVisible(True)
 
     def show_prediction_mode(self):
+        self.mode = self.PREDICTION
         self.instructions.setText('Press Button 1 and execute an activity. '
                                   'By releasing Button 1 the predicting process starts.')
         self.act_name.setVisible(False)
 
     def show_inactive_mode(self):
+        self.mode = self.INACTIVE
         self.instructions.setText('This node is inactive. Choose one of the other '
                                   'two modes to train or predict an activity.')
         self.act_name.setVisible(False)
 
+    def handle_button(self, data):
+        if int(data) == 0:
+            self.recording = False
+        else:
+            self.recording = True
+
+    def train_activity(self, kargs):
+        activity_name = self.act_name.getText()
+        if activity_name == '':
+            return
+        self.activities.append(activity_name)
+
+        if self.recording:
+            data = kargs['dataIn']
+            self.act_data[activity_name].append(data)
+            print(self.act_data)
+        else:
+            print('work')
+            self.init_activity()
+            categories = self.activities
+            # training_data = stand_freq[1:] + walk_freq[1:] + hop_freq[1:]
+            # self.c.fit(training_data, categories)
+
+    def predict_activity(self, kargs):
+        self.predict = self.c.predict(kargs['dataIn'])
+        print('prediction: ' , self.predict)
+
     def process(self, **kargs):
-        return {'frequency': self.predict}
+        if self.mode == self.TRAINING:
+            self.train_activity(kargs)
+        elif self.mode == self.PREDICTION:
+            self.predict_activity(kargs)
+        return {'prediction': self.predict}
 
 
 fclib.registerNodeType(SvmNode, [('Svm',)])
@@ -221,7 +268,7 @@ def create_flowcharts():
     app = QtGui.QApplication([])
     win = QtGui.QMainWindow()
     win.setWindowTitle('Activity Recognizer')
-    win.setMinimumSize(800,700)
+    win.setMinimumSize(900,800)
     central = QtGui.QWidget()
     win.setCentralWidget(central)
     layout = QtGui.QGridLayout()
@@ -238,12 +285,12 @@ def create_flowcharts():
     fft_node = fc.createNode("Fft", pos=(300, 0))
     svm_node = fc.createNode("Svm", pos=(450, 0))
     display_node = fc.createNode("text", pos=(600, 0))
-    # pw1 = pg.PlotWidget()
-    # layout.addWidget(pw1, 0, 1)
-    # pw1.setYRange(0, 1)
+    pw1 = pg.PlotWidget()
+    layout.addWidget(pw1, 0, 1)
+    pw1.setYRange(0, 1)
 
-    # pw1Node = fc.createNode('PlotWidget', pos=(0, -150))
-    # pw1Node.setPlot(pw1)
+    pw1Node = fc.createNode('PlotWidget', pos=(0, -150))
+    pw1Node.setPlot(pw1)
 
     fc.connectTerminals(dippid_node['accelX'], buffer_node_1['dataIn'])
     fc.connectTerminals(dippid_node['accelY'], buffer_node_2['dataIn'])
@@ -251,9 +298,12 @@ def create_flowcharts():
     fc.connectTerminals(buffer_node_1['dataOut'], fft_node['accelX'])
     fc.connectTerminals(buffer_node_2['dataOut'], fft_node['accelY'])
     fc.connectTerminals(buffer_node_3['dataOut'], fft_node['accelZ'])
-    # fc.connectTerminals(fft_node['frequency'], pw1Node['In'])
+    fc.connectTerminals(fft_node['frequency'], pw1Node['In'])
     #fc.connectTerminals(fft_node['frequency'], svm_node['dataIn'])
     #fc.connectTerminals(svm_node['prediction'], display_node['dataIn'])
+
+    #sensor = SensorUDP(5700)
+    #sensor.register_callback('button_1', svm_node.handle_button)
 
     win.show()
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
