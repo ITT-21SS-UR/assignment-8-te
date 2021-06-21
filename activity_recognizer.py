@@ -13,7 +13,6 @@ from sklearn import svm
 
 
 class FftNode(Node):
-
     nodeName = 'Fft'
 
     def __init__(self, name):
@@ -32,28 +31,13 @@ class FftNode(Node):
         Node.__init__(self, name, terminals=terminals)
 
     def process(self, **kargs):
-        #print(kargs['accelX'])
-        #print(kargs['accelY'])
-        #print(kargs['accelZ'])
-        #self.data_x = np.append(self.data_x, kargs['accelX'])
-        #self.data_y = np.append(self.data_y, kargs['accelY'])
-        #self.data_z = np.append(self.data_z, kargs['accelZ'])
-        #Y = fft.fft(y) / n  # fft computing and normalization\n",
-        #Y = Y[0:int(n/2)]
         avg = []
         for i in range(len(kargs['accelX'])):
-            avg.append((kargs['accelX'][i] + kargs['accelY'][i] + kargs['accelZ'][i])/3)
-        # print(avg)
-        frequency = np.abs(np.fft.fft(avg)/len(avg))[1:len(avg)//2]
-        # print(frequency)
-        self.frequency_x = np.abs(np.fft.fft(kargs['accelX'])/2)
-        self.frequency_y = np.abs(np.fft.fft(kargs['accelY'])/2)
-        self.frequency_z = np.abs(np.fft.fft(kargs['accelZ'])/2)
-        #self.frequency_x = [np.abs(fft(l) / len(l))[1:len(l) // 2] for l in kargs['accelX']]
-        #self.frequency_y = [np.abs(fft(l) / len(l))[1:len(l) // 2] for l in kargs['accelY']]
-        #self.frequency_z = [np.abs(fft(l) / len(l))[1:len(l) // 2] for l in kargs['accelZ']]
-        #print('dx: ', self.data_x, ' dy: ', self.data_y, ' dz: ', self.data_z)
-        # print('x: ', self.frequency_x, ' y: ', self.frequency_y, ' z: ', self.frequency_z)
+            avg.append((kargs['accelX'][i] + kargs['accelY'][i] + kargs['accelZ'][i]) / 3)
+        frequency = np.abs(np.fft.fft(avg) / len(avg))[1:len(avg) // 2]
+        # self.frequency_x = np.abs(np.fft.fft(kargs['accelX'])/2)
+        # self.frequency_y = np.abs(np.fft.fft(kargs['accelY'])/2)
+        # self.frequency_z = np.abs(np.fft.fft(kargs['accelZ'])/2)
         return {'frequency': frequency}
 
 
@@ -61,12 +45,12 @@ fclib.registerNodeType(FftNode, [('Fft',)])
 
 
 class SvmNode(Node):
-
     nodeName = 'Svm'
 
     TRAINING = 'training'
     PREDICTION = 'prediction'
     INACTIVE = 'inactive'
+
     # different modes (training, prediction, inactive)
     # ports dependent on mode
     # prediciton: in: sample, out: prediction
@@ -81,7 +65,7 @@ class SvmNode(Node):
             'prediction': dict(io='out'),
         }
         self.predict = ''
-        self.activities = []  # ['jump', 'work', 'walk', 'stand', 'hop']
+        self.activities = [] # ['jump', 'work', 'walk', 'stand', 'hop']
         self.act_data = {}
         self.mode = self.INACTIVE
         self.recording = False
@@ -89,16 +73,25 @@ class SvmNode(Node):
 
         self._init_ui()
 
-        # self.timer = QtCore.QTimer()
-        # self.timer.timeout().connect(self.handle_input)
-        # self.timer.start(100)
+        kargs = [0,1,2,3,4,5,6]
+
+        # Sensor for Button - enabled for testing but not working at the same time as dippid_node _ FÜR ANDI
+        sensor = SensorUDP(5700)
+        sensor.register_callback('button_1', self.handle_button)
+
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(lambda: self.train_activity(kargs))
+        self.timer.start(3000)
         Node.__init__(self, name, terminals=terminals)
 
     def _init_ui(self):
         self.ui = QtGui.QWidget()
         self.layout = QtGui.QVBoxLayout()
         self.mode_layout = QtGui.QGridLayout()
+        self.mode_layout.setRowMinimumHeight(0, 50)
+        self.mode_layout.setRowMinimumHeight(1, 100)
         self.list_layout = QtGui.QGridLayout()
+        self.list_layout.setRowMinimumHeight(0, 50)
 
         # mode buttons
         self.train_button = QtGui.QPushButton('Training')
@@ -130,25 +123,31 @@ class SvmNode(Node):
         return self.ui
 
     def init_activity(self):
+        #self.list_layout.setRowMinimumHeight(1, 50)
+        #self.list_layout.setRowMinimumHeight(2, 50)
+        #self.list_layout.setRowMinimumHeight(3, 50)
+        #self.list_layout.setRowMinimumHeight(4, 50)
+        #self.list_layout.setRowMinimumHeight(5, 50)
         # activities recorded, delete and retrain activities
         header = QtGui.QLabel('Activities:')
-        self.list_layout.addWidget(header, 7, 0)
+        self.list_layout.addWidget(header, 0, 0)
         add_button = QtGui.QPushButton('Add Activity')
         add_button.clicked.connect(self.show_training_mode)
-        self.list_layout.addWidget(add_button, 7, 2)
+        self.list_layout.addWidget(add_button, 0, 2)
         if len(self.activities) != 0:
             for i in range(len(self.activities)):
+                self.list_layout.setRowMinimumHeight(i + 1, 50)
                 activity = QtGui.QLabel(self.activities[i])
-                self.list_layout.addWidget(activity, i + 8, 0)
+                self.list_layout.addWidget(activity, i + 1, 0)
                 delete_button = QtGui.QPushButton('Delete')
                 delete_button.clicked.connect(lambda state, x=i: self.delete_activity(self.activities[x]))
-                self.list_layout.addWidget(delete_button, i + 8, 1)
+                self.list_layout.addWidget(delete_button, i + 1, 1)
                 retrain_button = QtGui.QPushButton('Retrain')
                 retrain_button.clicked.connect(lambda state, x=i: self.retrain_activity(self.activities[x]))
-                self.list_layout.addWidget(retrain_button, i + 8, 2)
+                self.list_layout.addWidget(retrain_button, i + 1, 2)
         else:
             empty = QtGui.QLabel('No activities recorded')
-            self.list_layout.addWidget(empty, 8, 1)
+            self.list_layout.addWidget(empty, 1, 1)
 
     def delete_activity(self, activity):
         self.activities.remove(activity)
@@ -187,19 +186,25 @@ class SvmNode(Node):
 
     def handle_button(self, data):
         if int(data) == 0:
+            print('button released')
             self.recording = False
         else:
+            print('button pressed')
             self.recording = True
 
     def train_activity(self, kargs):
-        activity_name = self.act_name.getText()
-        if activity_name == '':
-            return
-        self.activities.append(activity_name)
-
         if self.recording:
-            data = kargs['dataIn']
-            self.act_data[activity_name].append(data)
+            activity_name = str(self.act_name.text())
+            print(activity_name)
+            if activity_name == '':
+                return
+            if activity_name not in self.activities:
+                self.activities.append(activity_name)
+            data = kargs # ['dataIn']
+            if activity_name in self.act_data:
+                self.act_data[activity_name].append(data)
+            else:
+                self.act_data[activity_name] = [data]
             print(self.act_data)
         else:
             print('work')
@@ -210,7 +215,10 @@ class SvmNode(Node):
 
     def predict_activity(self, kargs):
         self.predict = self.c.predict(kargs['dataIn'])
-        print('prediction: ' , self.predict)
+        print('prediction: ', self.predict)
+
+    def handle_input(self):
+        print('fuck')
 
     def process(self, **kargs):
         if self.mode == self.TRAINING:
@@ -224,8 +232,8 @@ fclib.registerNodeType(SvmNode, [('Svm',)])
 
 
 class DisplayTextNode(Node):
-
     nodeName = 'text'
+
     # displays text on screen
 
     def __init__(self, name):
@@ -268,16 +276,19 @@ def create_flowcharts():
     app = QtGui.QApplication([])
     win = QtGui.QMainWindow()
     win.setWindowTitle('Activity Recognizer')
-    win.setMinimumSize(900,800)
+    win.setMinimumSize(900, 800)
     central = QtGui.QWidget()
     win.setCentralWidget(central)
     layout = QtGui.QGridLayout()
     central.setLayout(layout)
 
+    port = 5700
+
     fc = Flowchart(terminals={'out': dict(io='out')})
     layout.addWidget(fc.widget(), 0, 0, 2, 1)
 
     dippid_node = fc.createNode("DIPPID", pos=(0, 0))
+    # sensor = dippid_node.get_sensor()
     buffer_node_1 = fc.createNode("Buffer", pos=(150, -50))
     buffer_node_2 = fc.createNode("Buffer", pos=(150, 0))
     buffer_node_3 = fc.createNode("Buffer", pos=(150, 50))
@@ -285,12 +296,12 @@ def create_flowcharts():
     fft_node = fc.createNode("Fft", pos=(300, 0))
     svm_node = fc.createNode("Svm", pos=(450, 0))
     display_node = fc.createNode("text", pos=(600, 0))
-    pw1 = pg.PlotWidget()
-    layout.addWidget(pw1, 0, 1)
-    pw1.setYRange(0, 1)
+    # pw1 = pg.PlotWidget()
+    # layout.addWidget(pw1, 0, 1)
+    # pw1.setYRange(0, 1)
 
-    pw1Node = fc.createNode('PlotWidget', pos=(0, -150))
-    pw1Node.setPlot(pw1)
+    # pw1Node = fc.createNode('PlotWidget', pos=(0, -150))
+    # pw1Node.setPlot(pw1)
 
     fc.connectTerminals(dippid_node['accelX'], buffer_node_1['dataIn'])
     fc.connectTerminals(dippid_node['accelY'], buffer_node_2['dataIn'])
@@ -298,12 +309,14 @@ def create_flowcharts():
     fc.connectTerminals(buffer_node_1['dataOut'], fft_node['accelX'])
     fc.connectTerminals(buffer_node_2['dataOut'], fft_node['accelY'])
     fc.connectTerminals(buffer_node_3['dataOut'], fft_node['accelZ'])
-    fc.connectTerminals(fft_node['frequency'], pw1Node['In'])
-    #fc.connectTerminals(fft_node['frequency'], svm_node['dataIn'])
-    #fc.connectTerminals(svm_node['prediction'], display_node['dataIn'])
+    # fc.connectTerminals(fft_node['frequency'], pw1Node['In'])
+    fc.connectTerminals(fft_node['frequency'], svm_node['dataIn'])
+    fc.connectTerminals(svm_node['prediction'], display_node['dataIn'])
 
-    #sensor = SensorUDP(5700)
-    #sensor.register_callback('button_1', svm_node.handle_button)
+    # try to get sensor from dippid_node (with own function) - not working - FÜR ANDI
+    # sensor = dippid_node.get_sensor()
+    # if sensor is not None:
+      #  sensor.register_callback('button_1', svm_node.handle_button)
 
     win.show()
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):

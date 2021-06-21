@@ -142,6 +142,10 @@ class DIPPIDNode(Node):
         else:
             self.update_timer.start(1000 / rate)
 
+    # method for returning the sensor - FÜR ANDI
+    def get_sensor(self):
+        return self.dippid
+
     def process(self, **kwdargs):
         return {'accelX': np.array([self._acc_vals[0]]), 'accelY': np.array([self._acc_vals[1]]), 'accelZ': np.array([self._acc_vals[2]])}
 
