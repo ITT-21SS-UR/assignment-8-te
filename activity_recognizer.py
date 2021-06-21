@@ -1,4 +1,6 @@
 import sys
+import time
+
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtCore
 from pyqtgraph.flowchart import Flowchart, Node
@@ -76,8 +78,8 @@ class SvmNode(Node):
         kargs = [0,1,2,3,4,5,6]
 
         # Sensor for Button - enabled for testing but not working at the same time as dippid_node _ FÜR ANDI
-        sensor = SensorUDP(5700)
-        sensor.register_callback('button_1', self.handle_button)
+        # sensor = SensorUDP(5700)
+        # sensor.register_callback('button_1', self.handle_button)
 
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(lambda: self.train_activity(kargs))
@@ -102,6 +104,7 @@ class SvmNode(Node):
         self.mode_layout.addWidget(self.pred_button, 0, 1)
         self.inactive_button = QtGui.QPushButton('Inactive')
         self.inactive_button.clicked.connect(self.show_inactive_mode)
+        self.inactive_button.setDefault(True)
         self.mode_layout.addWidget(self.inactive_button, 0, 2)
 
         # instructions and name tag
@@ -165,6 +168,7 @@ class SvmNode(Node):
         self.act_name.setVisible(True)
 
     def show_training_mode(self):
+        self.train_button.setDefault(True)
         self.mode = self.TRAINING
         self.instructions.setText('Enter name of the activity you want to train. Then press Button 1 and execute '
                                   'the activity. By releasing\nButton 1 you stop the current record. You can record '
@@ -314,13 +318,23 @@ def create_flowcharts():
     fc.connectTerminals(svm_node['prediction'], display_node['dataIn'])
 
     # try to get sensor from dippid_node (with own function) - not working - FÜR ANDI
+    sensor = dippid_node.connect_button.clicked.connect(lambda: callback(dippid_node, svm_node))
+    print(sensor)
     # sensor = dippid_node.get_sensor()
-    # if sensor is not None:
-      #  sensor.register_callback('button_1', svm_node.handle_button)
+
+
 
     win.show()
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
         sys.exit(QtGui.QApplication.instance().exec_())
+
+
+def callback(d_node, s_node):
+    time.sleep(20)
+    sensor = d_node.get_sensor()
+    print(sensor)
+    sensor.register_callback('button_1', s_node.handle_button)
+    return sensor #node.get_sensor()
 
 
 if __name__ == '__main__':

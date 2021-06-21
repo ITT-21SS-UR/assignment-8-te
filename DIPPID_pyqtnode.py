@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 # -*- coding: utf-8 -*-
+import time
 
 from pyqtgraph.flowchart import Flowchart, Node
 from pyqtgraph.flowchart.library.common import CtrlNode
@@ -94,6 +95,7 @@ class DIPPIDNode(Node):
 
         self.connect_button = QtGui.QPushButton("connect")
         self.connect_button.clicked.connect(self.connect_device)
+        # self.connect_button.clicked.connect(self.callback)
         self.layout.addWidget(self.connect_button)
         self.ui.setLayout(self.layout)
 
@@ -141,6 +143,10 @@ class DIPPIDNode(Node):
             self.update_timer.stop()
         else:
             self.update_timer.start(1000 / rate)
+
+    def callback(self):
+        time.sleep(10)
+        self.get_sensor()
 
     # method for returning the sensor - FÜR ANDI
     def get_sensor(self):
