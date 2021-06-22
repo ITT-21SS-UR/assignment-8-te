@@ -13,6 +13,7 @@ from sklearn import svm
 # Authors: tg, ev
 # equal workload distribution
 
+# gestures that work well: standing, shaking, swinging
 
 class FftNode(Node):
     nodeName = 'FFT'
