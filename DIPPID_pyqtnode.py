@@ -95,7 +95,6 @@ class DIPPIDNode(Node):
 
         self.connect_button = QtGui.QPushButton("connect")
         self.connect_button.clicked.connect(self.connect_device)
-        # self.connect_button.clicked.connect(self.callback)
         self.layout.addWidget(self.connect_button)
         self.ui.setLayout(self.layout)
 
@@ -148,7 +147,7 @@ class DIPPIDNode(Node):
         time.sleep(10)
         self.get_sensor()
 
-    # method for returning the sensor - FÜR ANDI
+    # method for returning the sensor
     def get_sensor(self):
         return self.dippid
 

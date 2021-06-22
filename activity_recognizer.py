@@ -1,12 +1,9 @@
 import sys
 import time
-
-import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtCore
 from pyqtgraph.flowchart import Flowchart, Node
 import pyqtgraph.flowchart.library as fclib
-
-from DIPPID import SensorUDP
+from sklearn.exceptions import NotFittedError
 from DIPPID_pyqtnode import BufferNode, DIPPIDNode
 import numpy as np
 from pylab import *
@@ -15,7 +12,7 @@ from sklearn import svm
 
 
 class FftNode(Node):
-    nodeName = 'Fft'
+    nodeName = 'FFT'
 
     def __init__(self, name):
         terminals = {
@@ -24,39 +21,26 @@ class FftNode(Node):
             'accelZ': dict(io='in'),
             'frequency': dict(io='out'),
         }
-        self.data_x = np.array([])
-        self.data_y = np.array([])
-        self.data_z = np.array([])
-        self.frequency_x = []
-        self.frequency_y = []
-        self.frequency_z = []
+        self.frequency = None
         Node.__init__(self, name, terminals=terminals)
 
     def process(self, **kargs):
         avg = []
         for i in range(len(kargs['accelX'])):
             avg.append((kargs['accelX'][i] + kargs['accelY'][i] + kargs['accelZ'][i]) / 3)
-        frequency = np.abs(np.fft.fft(avg) / len(avg))[1:len(avg) // 2]
-        # self.frequency_x = np.abs(np.fft.fft(kargs['accelX'])/2)
-        # self.frequency_y = np.abs(np.fft.fft(kargs['accelY'])/2)
-        # self.frequency_z = np.abs(np.fft.fft(kargs['accelZ'])/2)
-        return {'frequency': frequency}
+        self.frequency = np.abs(np.fft.fft(avg) / len(avg))[1:len(avg) // 2]
+        return {'frequency': self.frequency}
 
 
 fclib.registerNodeType(FftNode, [('Fft',)])
 
 
 class SvmNode(Node):
-    nodeName = 'Svm'
+    nodeName = 'SVM'
 
     TRAINING = 'training'
     PREDICTION = 'prediction'
     INACTIVE = 'inactive'
-
-    # different modes (training, prediction, inactive)
-    # ports dependent on mode
-    # prediciton: in: sample, out: prediction
-    # training: in: list of frequncy, train data, out:? (current recognition?) category as textfield
 
     def __init__(self, name):
         terminals = {
@@ -64,8 +48,9 @@ class SvmNode(Node):
             'prediction': dict(io='out'),
         }
         self.predict = ''
-        self.activities = []  # ['jump', 'work', 'walk', 'stand', 'hop']
+        self.activities = []
         self.act_data = {}
+        self.reference = {}
         self.mode = self.INACTIVE
         self.recording = False
         self.c = svm.SVC()
@@ -115,11 +100,6 @@ class SvmNode(Node):
 
     # inits the activity list
     def init_activity(self):
-        #self.list_layout.setRowMinimumHeight(1, 50)
-        #self.list_layout.setRowMinimumHeight(2, 50)
-        #self.list_layout.setRowMinimumHeight(3, 50)
-        #self.list_layout.setRowMinimumHeight(4, 50)
-        #self.list_layout.setRowMinimumHeight(5, 50)
         # activities recorded, delete and retrain activities
         header = QtGui.QLabel('Activities:')
         self.list_layout.addWidget(header, 0, 0)
@@ -138,8 +118,8 @@ class SvmNode(Node):
                 retrain_button.clicked.connect(lambda state, x=i: self.retrain_activity(self.activities[x]))
                 self.list_layout.addWidget(retrain_button, i + 1, 2)
         else:
-            empty = QtGui.QLabel('No activities recorded')
-            self.list_layout.addWidget(empty, 1, 1)
+            blank = QtGui.QLabel('No activities recorded')
+            self.list_layout.addWidget(blank, 1, 1)
 
     def delete_activity(self, activity):
         # remove activity from ui
@@ -151,7 +131,9 @@ class SvmNode(Node):
         # remove data of activity
         if activity in self.act_data:
             self.act_data.pop(activity, None)
-        # print(self.act_data)
+        # remove reference
+        if activity in self.reference:
+            self.reference.pop(activity, None)
 
     def retrain_activity(self, activity):
         # setup ui for training
@@ -165,14 +147,14 @@ class SvmNode(Node):
         # remove already existing data
         if activity in self.act_data:
             self.act_data.pop(activity, None)
-        # print(self.act_data)
 
     def show_training_mode(self):
         self.mode = self.TRAINING
         self.selected_button(self.mode)
-        self.instructions.setText('Enter name of the activity you want to train. Then press Button 1 and execute '
-                                  'the activity. By releasing\nButton 1 you stop the current record. You can record '
-                                  'multiple example of the same activity like that.')
+        self.instructions.setText('Enter name of the activity. Then press Button 1 and execute the activity to train. '
+                                  'By releasing Button 1 you stop the\ncurrent record. You can record '
+                                  'multiple example of the same activity like that. Record at least 2 activities for '
+                                  'prediction.')
         self.act_name.setText('')
         self.act_name.setVisible(True)
 
@@ -215,7 +197,6 @@ class SvmNode(Node):
     def train_activity(self, kargs):
         if self.recording:
             activity_name = str(self.act_name.text())
-            # print(activity_name)
             if activity_name == '':
                 return
             if activity_name not in self.activities:
@@ -225,17 +206,31 @@ class SvmNode(Node):
                 self.act_data[activity_name].append(data)
             else:
                 self.act_data[activity_name] = [data]
-            print(self.act_data)
         else:
-            # print('work')
             self.init_activity()
-            categories = self.activities
-            # training_data = stand_freq[1:] + walk_freq[1:] + hop_freq[1:]
-            # self.c.fit(training_data, categories)
+            categories = []
+            training_data = []
+            i = 0
+            for name in self.act_data:
+                self.reference[name] = i
+                for data in self.act_data[name]:
+                    training_data.append(data)
+                    categories.append(i)
+                i = i + 1
+            # train machine on data
+            self.c.fit(training_data, categories)
 
+    # predicts the activity when recording, returns if data is not trained
     def predict_activity(self, kargs):
-        self.predict = self.c.predict(kargs['dataIn'])
-        print('prediction: ', self.predict)
+        if self.recording:
+            try:
+                prediction = self.c.predict([kargs['dataIn']])
+            except NotFittedError:
+                return
+            # sets output text to predicted activity
+            for ref in self.reference:
+                if self.reference[ref] == prediction[0]:
+                    self.predict = ref
 
     def process(self, **kargs):
         if self.mode == self.TRAINING:
@@ -249,16 +244,13 @@ fclib.registerNodeType(SvmNode, [('Svm',)])
 
 
 class DisplayTextNode(Node):
-    nodeName = 'text'
-
-    # displays text on screen
+    nodeName = 'PredictText'
 
     def __init__(self, name):
         terminals = {
             'dataIn': dict(io='in'),
             'prediction': dict(io='out'),
         }
-        # self.text = ''
         self._init_ui()
         Node.__init__(self, name, terminals=terminals)
 
@@ -266,12 +258,12 @@ class DisplayTextNode(Node):
         self.ui = QtGui.QWidget()
         self.layout = QtGui.QGridLayout()
 
-        label = QtGui.QLabel("Prediction:")
+        label = QtGui.QLabel("Last Prediction:")
         self.layout.addWidget(label)
-
+        # where prediction is shown, default text if not connected
         self.text = QtGui.QLabel()
-        self.addr = "5700"
-        self.text.setText(self.addr)
+        self.standard = 'Connect Dippid to start training and prediction.'
+        self.text.setText(self.standard)
         self.layout.addWidget(self.text)
 
         self.ui.setLayout(self.layout)
@@ -280,10 +272,8 @@ class DisplayTextNode(Node):
         return self.ui
 
     def process(self, **kargs):
-        pred = kargs['dataIn'][0]
-        pred = 'Help'
-        self.text.setText(pred)
-        # return {'prediction': self.text}
+        prediction = kargs['dataIn']
+        self.text.setText(prediction)
 
 
 fclib.registerNodeType(DisplayTextNode, [('display',)])
@@ -302,28 +292,22 @@ def create_flowcharts():
     fc = Flowchart(terminals={'out': dict(io='out')})
     layout.addWidget(fc.widget(), 0, 0, 2, 1)
 
+    # create nodes
     dippid_node = fc.createNode("DIPPID", pos=(0, 0))
     buffer_node_1 = fc.createNode("Buffer", pos=(150, -50))
     buffer_node_2 = fc.createNode("Buffer", pos=(150, 0))
     buffer_node_3 = fc.createNode("Buffer", pos=(150, 50))
+    fft_node = fc.createNode("FFT", pos=(300, 0))
+    svm_node = fc.createNode("SVM", pos=(450, 0))
+    display_node = fc.createNode("PredictText", pos=(600, 0))
 
-    fft_node = fc.createNode("Fft", pos=(300, 0))
-    svm_node = fc.createNode("Svm", pos=(450, 0))
-    display_node = fc.createNode("text", pos=(600, 0))
-    # pw1 = pg.PlotWidget()
-    # layout.addWidget(pw1, 0, 1)
-    # pw1.setYRange(0, 1)
-
-    # pw1Node = fc.createNode('PlotWidget', pos=(0, -150))
-    # pw1Node.setPlot(pw1)
-
+    # connect nodes
     fc.connectTerminals(dippid_node['accelX'], buffer_node_1['dataIn'])
     fc.connectTerminals(dippid_node['accelY'], buffer_node_2['dataIn'])
     fc.connectTerminals(dippid_node['accelZ'], buffer_node_3['dataIn'])
     fc.connectTerminals(buffer_node_1['dataOut'], fft_node['accelX'])
     fc.connectTerminals(buffer_node_2['dataOut'], fft_node['accelY'])
     fc.connectTerminals(buffer_node_3['dataOut'], fft_node['accelZ'])
-    # fc.connectTerminals(fft_node['frequency'], pw1Node['In'])
     fc.connectTerminals(fft_node['frequency'], svm_node['dataIn'])
     fc.connectTerminals(svm_node['prediction'], display_node['dataIn'])
 
@@ -336,9 +320,9 @@ def create_flowcharts():
 
 
 # callback function on connect button of dippid_node to get sensor for svm_node.
-# wait 5 secs before getting sensor and register button in app on same sensor
+# wait 1 sec before getting sensor and register button in app on same sensor
 def callback(d_node, s_node):
-    time.sleep(5)
+    time.sleep(1)
     sensor = d_node.get_sensor()
     sensor.register_callback('button_1', s_node.handle_button)
 
