@@ -58,16 +58,13 @@ class SvmNode(Node):
     # prediciton: in: sample, out: prediction
     # training: in: list of frequncy, train data, out:? (current recognition?) category as textfield
 
-    # when train active, press button 1 to start motion, as long as same name it trains, adds activity when name and
-    # button 1 is pressed first.
-
     def __init__(self, name):
         terminals = {
             'dataIn': dict(io='in'),
             'prediction': dict(io='out'),
         }
         self.predict = ''
-        self.activities = [] # ['jump', 'work', 'walk', 'stand', 'hop']
+        self.activities = []  # ['jump', 'work', 'walk', 'stand', 'hop']
         self.act_data = {}
         self.mode = self.INACTIVE
         self.recording = False
@@ -75,15 +72,6 @@ class SvmNode(Node):
 
         self._init_ui()
 
-        kargs = [0,1,2,3,4,5,6]
-
-        # Sensor for Button - enabled for testing but not working at the same time as dippid_node _ FÜR ANDI
-        # sensor = SensorUDP(5700)
-        # sensor.register_callback('button_1', self.handle_button)
-
-        self.timer = QtCore.QTimer()
-        self.timer.timeout.connect(lambda: self.train_activity(kargs))
-        self.timer.start(3000)
         Node.__init__(self, name, terminals=terminals)
 
     def _init_ui(self):
@@ -125,6 +113,7 @@ class SvmNode(Node):
     def ctrlWidget(self):
         return self.ui
 
+    # inits the activity list
     def init_activity(self):
         #self.list_layout.setRowMinimumHeight(1, 50)
         #self.list_layout.setRowMinimumHeight(2, 50)
@@ -153,23 +142,34 @@ class SvmNode(Node):
             self.list_layout.addWidget(empty, 1, 1)
 
     def delete_activity(self, activity):
+        # remove activity from ui
         self.activities.remove(activity)
         # https://stackoverflow.com/questions/4528347/clear-all-widgets-in-a-layout-in-pyqt
         for i in reversed(range(self.list_layout.count())):
             self.list_layout.itemAt(i).widget().setParent(None)
         self.init_activity()
+        # remove data of activity
+        if activity in self.act_data:
+            self.act_data.pop(activity, None)
+        # print(self.act_data)
 
     def retrain_activity(self, activity):
+        # setup ui for training
         self.mode = self.TRAINING
+        self.selected_button(self.mode)
         self.instructions.setText('Press Button 1 and execute '
                                   'the activity. By releasing Button 1 you stop the current record.\n You can record '
                                   'multiple example of the same activity like that.')
         self.act_name.setText(activity)
         self.act_name.setVisible(True)
+        # remove already existing data
+        if activity in self.act_data:
+            self.act_data.pop(activity, None)
+        # print(self.act_data)
 
     def show_training_mode(self):
-        self.train_button.setDefault(True)
         self.mode = self.TRAINING
+        self.selected_button(self.mode)
         self.instructions.setText('Enter name of the activity you want to train. Then press Button 1 and execute '
                                   'the activity. By releasing\nButton 1 you stop the current record. You can record '
                                   'multiple example of the same activity like that.')
@@ -178,40 +178,56 @@ class SvmNode(Node):
 
     def show_prediction_mode(self):
         self.mode = self.PREDICTION
+        self.selected_button(self.mode)
         self.instructions.setText('Press Button 1 and execute an activity. '
                                   'By releasing Button 1 the predicting process starts.')
         self.act_name.setVisible(False)
 
     def show_inactive_mode(self):
         self.mode = self.INACTIVE
+        self.selected_button(self.mode)
         self.instructions.setText('This node is inactive. Choose one of the other '
                                   'two modes to train or predict an activity.')
         self.act_name.setVisible(False)
 
+    # shows which mode is currently selected
+    def selected_button(self, mode):
+        if mode == self.TRAINING:
+            self.train_button.setDefault(True)
+            self.pred_button.setDefault(False)
+            self.inactive_button.setDefault(False)
+        elif mode == self.PREDICTION:
+            self.train_button.setDefault(False)
+            self.pred_button.setDefault(True)
+            self.inactive_button.setDefault(False)
+        elif mode == self.INACTIVE:
+            self.train_button.setDefault(False)
+            self.pred_button.setDefault(False)
+            self.inactive_button.setDefault(True)
+
     def handle_button(self, data):
         if int(data) == 0:
-            print('button released')
             self.recording = False
         else:
-            print('button pressed')
             self.recording = True
 
+    # adds data to dictionary and list if recording and trains the machine with the data when recording has stopped
     def train_activity(self, kargs):
         if self.recording:
             activity_name = str(self.act_name.text())
-            print(activity_name)
+            # print(activity_name)
             if activity_name == '':
                 return
             if activity_name not in self.activities:
                 self.activities.append(activity_name)
-            data = kargs # ['dataIn']
+            data = kargs['dataIn']
             if activity_name in self.act_data:
                 self.act_data[activity_name].append(data)
             else:
                 self.act_data[activity_name] = [data]
             print(self.act_data)
         else:
-            print('work')
+            # print('work')
             self.init_activity()
             categories = self.activities
             # training_data = stand_freq[1:] + walk_freq[1:] + hop_freq[1:]
@@ -220,9 +236,6 @@ class SvmNode(Node):
     def predict_activity(self, kargs):
         self.predict = self.c.predict(kargs['dataIn'])
         print('prediction: ', self.predict)
-
-    def handle_input(self):
-        print('fuck')
 
     def process(self, **kargs):
         if self.mode == self.TRAINING:
@@ -286,13 +299,10 @@ def create_flowcharts():
     layout = QtGui.QGridLayout()
     central.setLayout(layout)
 
-    port = 5700
-
     fc = Flowchart(terminals={'out': dict(io='out')})
     layout.addWidget(fc.widget(), 0, 0, 2, 1)
 
     dippid_node = fc.createNode("DIPPID", pos=(0, 0))
-    # sensor = dippid_node.get_sensor()
     buffer_node_1 = fc.createNode("Buffer", pos=(150, -50))
     buffer_node_2 = fc.createNode("Buffer", pos=(150, 0))
     buffer_node_3 = fc.createNode("Buffer", pos=(150, 50))
@@ -317,24 +327,20 @@ def create_flowcharts():
     fc.connectTerminals(fft_node['frequency'], svm_node['dataIn'])
     fc.connectTerminals(svm_node['prediction'], display_node['dataIn'])
 
-    # try to get sensor from dippid_node (with own function) - not working - FÜR ANDI
-    sensor = dippid_node.connect_button.clicked.connect(lambda: callback(dippid_node, svm_node))
-    print(sensor)
-    # sensor = dippid_node.get_sensor()
-
-
+    # register callback on dippid_node connect button to get sensor data for svm_node
+    dippid_node.connect_button.clicked.connect(lambda: callback(dippid_node, svm_node))
 
     win.show()
     if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
         sys.exit(QtGui.QApplication.instance().exec_())
 
 
+# callback function on connect button of dippid_node to get sensor for svm_node.
+# wait 5 secs before getting sensor and register button in app on same sensor
 def callback(d_node, s_node):
-    time.sleep(20)
+    time.sleep(5)
     sensor = d_node.get_sensor()
-    print(sensor)
     sensor.register_callback('button_1', s_node.handle_button)
-    return sensor #node.get_sensor()
 
 
 if __name__ == '__main__':
