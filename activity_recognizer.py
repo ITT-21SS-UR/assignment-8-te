@@ -10,6 +10,9 @@ from pylab import *
 from scipy.fft import fft
 from sklearn import svm
 
+# Authors: tg, ev
+# equal workload distribution
+
 
 class FftNode(Node):
     nodeName = 'FFT'
